@@ -370,9 +370,15 @@ export default function ReaderPage({ params }) {
   // render 1:1 on desktop; FreestylePage scales itself down to fit phones.
   const freestyleNow = isFreestylePage(pages[idx]);
   const readWrap = freestyleNow ? { ...wrap, maxWidth: Math.max(wrap.maxWidth || 560, 600) } : wrap;
+  // Freestyle "cards" are a fixed-width canvas scaled to fit. On a phone, use the
+  // full width (less side padding → the card renders bigger) and keep it centred
+  // so the empty space is balanced top/bottom rather than drifting low.
+  const readBase = freestyleNow
+    ? { ...base, padding: "16px 8px" }
+    : base;
 
   return (
-    <div style={base}><Grain /><Glow /><Watermark /><PreviewBadge /><ScreenshotOverlay /><ProtectionLayer /><LetterProseStyles /><StoryStyles />
+    <div style={readBase}><Grain /><Glow /><Watermark /><PreviewBadge /><ScreenshotOverlay /><ProtectionLayer /><LetterProseStyles /><StoryStyles />
       <style>{`
         @keyframes lpDissolve { 0%{opacity:1;filter:blur(0);transform:translateY(0) scale(1)} 100%{opacity:0;filter:blur(10px);transform:translateY(-60px) scale(1.04)} }
         @keyframes lpEmber { 0%{opacity:0;transform:translateY(0) scale(.6)} 15%{opacity:1} 100%{opacity:0;transform:translateY(-240px) scale(1.1)} }
@@ -385,9 +391,11 @@ export default function ReaderPage({ params }) {
       {dissolving && <EmberOverlay t={t} />}
 
       <div ref={scrollRef} onScroll={onScroll} {...holdProps} style={{ ...readWrap, ...themeToVars(t), maxHeight: "calc(100vh - 96px)", overflowX: "hidden", overflowY: "auto", filter: protFilter, transition: "filter 0.2s", animation: dissolving ? "lpDissolve 2.6s ease-in forwards" : undefined }}>
-        <div style={{ fontSize: 10, letterSpacing: 4, color: t.divider, marginBottom: 36, textAlign: "center" }}>
-          — {["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][idx] || idx + 1} —
-        </div>
+        {pages.length > 1 && (
+          <div style={{ fontSize: 10, letterSpacing: 4, color: t.divider, marginBottom: freestyleNow ? 14 : 36, textAlign: "center" }}>
+            — {["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][idx] || idx + 1} —
+          </div>
+        )}
         {isFreestylePage(pages[idx])
           ? <FreestylePage key={idx} pageDoc={pages[idx]} anim={anim} />
           : <LetterPage key={idx} pageDoc={pages[idx]} anim={anim} />}
