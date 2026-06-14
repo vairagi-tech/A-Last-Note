@@ -136,11 +136,12 @@ export default function AdminPage() {
       return null;
     }
     if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
       const hint = res.status === 401
-        ? "Your admin session isn't valid on the server (401). On a deployed site this is almost always Clerk DEV keys (pk_test) on a live domain — switch to Clerk production keys."
+        ? "Your admin session isn't valid on the server (401)."
         : res.status === 403 ? "This letter belongs to a different account (403)."
         : `Server error (${res.status}).`;
-      alert("Couldn't save. " + hint);
+      alert("Couldn't save. " + hint + (data.detail ? `\n\nDetail: ${data.detail}` : ""));
       return null;
     }
     const letter = await res.json();

@@ -38,7 +38,10 @@ export async function POST(req) {
       const existing = await col.findOne({ linkId: body.linkId });
       if (existing && !ownsLetter(existing, a.userId, a.enabled)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-      const { _id, ownerId, ...updateData } = body;
+      // Strip _id/ownerId AND createdAt/updatedAt: createdAt is set via
+      // $setOnInsert below, so leaving it in $set would conflict (same path) and
+      // make MongoDB throw — the cause of the save 500.
+      const { _id, ownerId, createdAt, updatedAt, ...updateData } = body;
       if (updateData.settings) {
         updateData.settings = { ...updateData.settings, password: await resolvePassword(updateData.settings.password, existing?.settings?.password) };
       }
@@ -100,6 +103,7 @@ export async function POST(req) {
     return NextResponse.json(strip(letter), { status: 201 });
   } catch (e) {
     console.error("[letters POST]", e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    // TEMP debug: echo the message so the admin popup shows the real cause. Revert after.
+    return NextResponse.json({ error: "Server error", detail: e.message }, { status: 500 });
   }
 }
