@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getLetters } from "@/lib/mongodb";
 import { requireOwner, ownsLetter } from "@/lib/auth";
