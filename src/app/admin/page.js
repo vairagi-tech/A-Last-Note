@@ -87,7 +87,14 @@ export default function AdminPage() {
     if (t.doc) { base.doc = t.doc; base.blocks = []; }
     if (t.buttons) base.buttons = { ...base.buttons, ...t.buttons };
     base.settings.experience = { ...base.settings.experience, ...(defaults.experience || {}), ...(t.experience || {}) };
-    const d = await fetch("/api/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(base) }).then(r => r.json());
+    const res = await fetch("/api/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(base) }).catch(() => null);
+    if (!res || !res.ok) {
+      alert("Couldn't create the letter. " + (res?.status === 401
+        ? "Admin session invalid on the server (401) — on a live site this is usually Clerk DEV keys; switch to production keys."
+        : `Server error (${res?.status || "network"}).`));
+      return;
+    }
+    const d = await res.json();
     await loadLetters();
     const norm = flattenSectionsToBlocks(d);
     const s = norm.settings || {};
@@ -121,7 +128,22 @@ export default function AdminPage() {
 
   const save = async () => {
     const body = { ...active, linkId: active.linkId };
-    const letter = await fetch("/api/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    let res;
+    try {
+      res = await fetch("/api/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } catch {
+      alert("Couldn't save — network error. Check your connection.");
+      return null;
+    }
+    if (!res.ok) {
+      const hint = res.status === 401
+        ? "Your admin session isn't valid on the server (401). On a deployed site this is almost always Clerk DEV keys (pk_test) on a live domain — switch to Clerk production keys."
+        : res.status === 403 ? "This letter belongs to a different account (403)."
+        : `Server error (${res.status}).`;
+      alert("Couldn't save. " + hint);
+      return null;
+    }
+    const letter = await res.json();
     setActive(p => ({ ...p, linkId: letter.linkId, stats: letter.stats }));
     setSaved(true); setTimeout(() => setSaved(false), 2000); loadLetters();
     return letter.linkId || active.linkId;
