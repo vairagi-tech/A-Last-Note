@@ -2,8 +2,8 @@ import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 
 export const metadata = {
-  title: "Letter Platform",
-  description: "Interactive reading platform with live tracking",
+  title: "A Last Note",
+  description: "Intimate, self-destructing letters — written to be read once.",
 };
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;

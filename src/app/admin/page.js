@@ -173,8 +173,7 @@ export default function AdminPage() {
       <aside className={`fixed md:sticky top-0 z-40 transition-transform duration-200 ${navOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
         style={{ width: 250, flexShrink: 0, background: A.side, borderRight: `1px solid ${A.border}`, display: "flex", flexDirection: "column", height: "100vh" }}>
         <div className="flex items-center gap-2 px-3 py-3" style={{ borderBottom: `1px solid ${A.border}` }}>
-          <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: A.accent, color: A.onAccent }}><IcoSpark /></div>
-          <span className="text-[13px] font-semibold flex-1 truncate" style={{ color: A.bright }}>{CLERK_ON ? <WorkspaceName /> : "My Letters"}</span>
+          <BrandMark className="flex-1" />
           <button onClick={toggleMode} title={mode === "dark" ? "Light mode" : "Dark mode"} className="p-1 rounded-md" style={{ color: A.dim }}>{mode === "dark" ? <IcoSun /> : <IcoMoon />}</button>
           {CLERK_ON && <UserButton afterSignOutUrl="/" />}
         </div>
@@ -211,7 +210,7 @@ export default function AdminPage() {
       <main style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: "auto" }}>
         <div className="md:hidden flex items-center gap-3 px-4 py-3 sticky top-0 z-20" style={{ borderBottom: `1px solid ${A.border}`, background: A.bg }}>
           <button onClick={() => setNavOpen(true)} className="text-lg leading-none px-2 py-1 rounded-md" style={{ color: A.bright, border: `1px solid ${A.border}` }} aria-label="Menu">☰</button>
-          <span className="text-[13px] font-semibold" style={{ color: A.bright }}>{CLERK_ON ? <WorkspaceName /> : "My Letters"}</span>
+          <BrandMark />
         </div>
         {view === "home" && <HomePane name={CLERK_ON ? <WorkspaceName /> : "your"} letters={letters} createLetter={startNew} openEditor={openEditor} patchLetter={patchLetter} duplicateLetter={duplicateLetter} deleteLetter={setConfirmDel} renameLetter={renameLetter} appUrl={appUrl} defaults={defaults} saveDefaults={saveDefaults} />}
 
@@ -277,6 +276,20 @@ function WorkspaceName() {
   const { user } = useUser();
   const n = user?.firstName || user?.username || (user?.primaryEmailAddress?.emailAddress || "").split("@")[0] || "My";
   return <>{n}&rsquo;s Letters</>;
+}
+
+// The feather/quill mark from the landing hero — currentColor so it inherits.
+const Feather = (p) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" /><line x1="16" y1="8" x2="2" y2="22" /><line x1="17.5" y1="15" x2="9" y2="15" /></svg>;
+
+// App brand: feather badge + "A Last Note" in italic serif.
+function BrandMark({ className = "" }) {
+  const A = useTheme();
+  return (
+    <span className={`flex items-center gap-2 min-w-0 ${className}`}>
+      <span className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: A.accent, color: A.onAccent }}><Feather /></span>
+      <span className="truncate" style={{ color: A.bright, fontFamily: "'Cormorant Garamond', Georgia, serif", fontStyle: "italic", fontWeight: 600, fontSize: 16 }}>A Last Note</span>
+    </span>
+  );
 }
 
 function SideHeader({ children }) {

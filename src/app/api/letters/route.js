@@ -103,7 +103,6 @@ export async function POST(req) {
     return NextResponse.json(strip(letter), { status: 201 });
   } catch (e) {
     console.error("[letters POST]", e);
-    // TEMP debug: echo the message so the admin popup shows the real cause. Revert after.
-    return NextResponse.json({ error: "Server error", detail: e.message }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
