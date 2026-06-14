@@ -1,49 +1,40 @@
 import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI;
-const options = {};
-
-let client;
+// Lazily create ONE client connection — NEVER at module load. Creating it at the
+// top level would run during `next build` (page-data collection), forcing the
+// build to have a valid MONGODB_URI just to compile. Instead we connect on the
+// first getDb() call (request time), cache it for the life of the serverless
+// instance, and in dev cache on `global` so HMR doesn't open new pools.
 let clientPromise;
 
-if (!uri) {
-  throw new Error("Please add MONGODB_URI to .env.local");
-}
-
-if (process.env.NODE_ENV === "development") {
-  if (!global._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    global._mongoClientPromise = client.connect();
+function connect() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error("MONGODB_URI is not set");
+  if (process.env.NODE_ENV === "development") {
+    if (!global._mongoClientPromise) global._mongoClientPromise = new MongoClient(uri).connect();
+    return global._mongoClientPromise;
   }
-  clientPromise = global._mongoClientPromise;
-} else {
-  client = new MongoClient(uri, options);
-  clientPromise = client.connect();
+  return new MongoClient(uri).connect();
 }
-
-export default clientPromise;
 
 export async function getDb() {
+  if (!clientPromise) clientPromise = connect();
   const client = await clientPromise;
   return client.db("letter-platform");
 }
 
 export async function getLetters() {
-  const db = await getDb();
-  return db.collection("letters");
+  return (await getDb()).collection("letters");
 }
 
 export async function getSessions() {
-  const db = await getDb();
-  return db.collection("sessions");
+  return (await getDb()).collection("sessions");
 }
 
 export async function getReaders() {
-  const db = await getDb();
-  return db.collection("readers");
+  return (await getDb()).collection("readers");
 }
 
 export async function getUserSettings() {
-  const db = await getDb();
-  return db.collection("userSettings");
+  return (await getDb()).collection("userSettings");
 }
