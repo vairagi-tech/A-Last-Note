@@ -34,4 +34,7 @@ body {
 
 .animate-fade-in { animation: fadeIn 0.5s ease forwards; }
 .animate-pulse-slow { animation: pulse 2s infinite; }
-.animate-grain { animation: grain 0.5s steps(1) infinite; }
+/* Static grain texture. Animating it repainted the whole screen ~2×/sec and was
+   the main cause of laggy/janky scrolling on phones — the texture alone gives the
+   same look at zero runtime cost. */
+.animate-grain { animation: none; }

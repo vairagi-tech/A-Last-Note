@@ -122,9 +122,10 @@ export default function ReaderPage({ params }) {
     const act = () => { lastActivity.current = Date.now(); };
     const onClick = () => { clicks.current++; act(); };
     const idleTick = setInterval(() => { if (Date.now() - lastActivity.current > 10000) idleSec.current += 1; }, 1000);
-    document.addEventListener("click", onClick);
-    document.addEventListener("keydown", act);
-    document.addEventListener("mousemove", act);
+    const opts = { passive: true };
+    document.addEventListener("click", onClick, opts);
+    document.addEventListener("keydown", act, opts);
+    document.addEventListener("mousemove", act, opts);
     return () => { clearInterval(idleTick); document.removeEventListener("click", onClick); document.removeEventListener("keydown", act); document.removeEventListener("mousemove", act); };
   }, []);
 
@@ -200,7 +201,8 @@ export default function ReaderPage({ params }) {
     };
     ping();
     // Tender-analytics: one presence ping, no per-interval surveillance.
-    if (!letter?.settings?.experience?.minimalAnalytics) pingRef.current = setInterval(ping, 4000);
+    // 12s (was 4s) — enough for "still reading" presence without hammering the DB.
+    if (!letter?.settings?.experience?.minimalAnalytics) pingRef.current = setInterval(ping, 12000);
     return () => clearInterval(pingRef.current);
   }, [stage, idx, linkId, letter]);
 

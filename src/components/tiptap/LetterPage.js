@@ -1,31 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
-import { buildExtensions } from "@/components/tiptap/extensions";
+import { useEffect, useRef } from "react";
+import StaticDoc from "@/components/tiptap/StaticDoc";
 import { applyBlockReveal, wrapWords, applyWordAnim } from "@/components/tiptap/storyAnim";
 
 const TEXTY = /^(P|H1|H2|H3|BLOCKQUOTE|LI|UL|OL)$/;
 
-// Renders one reader page (a sub-doc) read-only, then plays the Story animations:
+// Renders one reader page (a sub-doc) read-only via the lightweight StaticDoc
+// renderer (no editor), then plays the Story animations on the rendered blocks:
 // per-block reveals and optional per-word text effects, staggered.
 export default function LetterPage({ pageDoc, anim }) {
-  const editor = useEditor({
-    immediatelyRender: false,
-    editable: false,
-    extensions: buildExtensions(),
-    content: pageDoc || { type: "doc", content: [] },
-    editorProps: { attributes: { class: "lp-read" } },
-  });
+  const ref = useRef(null);
 
   useEffect(() => {
-    if (!editor || !anim) return;
+    if (!ref.current || !anim) return;
     const hasBlock = anim.blockReveal && anim.blockReveal !== "none";
     const hasWord = anim.wordAnim && anim.wordAnim !== "none";
     const hasBreath = !hasBlock && anim.breathPace > 0;
     if (!hasBlock && !hasWord && !hasBreath) return;
     const tm = setTimeout(() => {
-      const root = editor.view?.dom;
+      const root = ref.current;
       const blocks = root ? Array.from(root.children) : [];
       blocks.forEach((blk, bi) => {
         const blockDelay = bi * anim.revealStagger;
@@ -42,8 +36,7 @@ export default function LetterPage({ pageDoc, anim }) {
     }, 130);
     return () => clearTimeout(tm);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor]);
+  }, [pageDoc, anim]);
 
-  if (!editor) return null;
-  return <EditorContent editor={editor} />;
+  return <StaticDoc doc={pageDoc} innerRef={ref} />;
 }
