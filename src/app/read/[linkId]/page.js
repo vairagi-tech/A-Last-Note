@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { getTheme, resolveButtonStyle } from "@/lib/themes";
 import { generateId, generateToken, formatTime, getReaderContext, getFingerprint, resolveLayout } from "@/lib/utils";
@@ -29,7 +29,6 @@ export default function ReaderPage({ params }) {
   const [gate, setGate] = useState({ needsPassword: false, nameMode: "off" });
   const [pwInput, setPwInput] = useState("");
   const [pwError, setPwError] = useState(false);
-  const [nameInput, setNameInput] = useState("");
   const [idx, setIdx] = useState(0);
   const [show, setShow] = useState(true);
   const [screenshotWarning, setScreenshotWarning] = useState(false);
@@ -211,11 +210,13 @@ export default function ReaderPage({ params }) {
     return () => clearInterval(pingRef.current);
   }, [stage, idx, linkId, letter]);
 
-  const t = letter ? getTheme(letter) : getTheme(null);
-  const pages = letter ? splitDocIntoPages(getLetterDoc(letter)) : [{ type: "doc", content: [] }];
+  // Memoize the per-letter derivations so they don't recompute on every keystroke /
+  // state change (each reader re-render otherwise re-derives the whole doc + pages).
+  const t = useMemo(() => (letter ? getTheme(letter) : getTheme(null)), [letter]);
+  const pages = useMemo(() => (letter ? splitDocIntoPages(getLetterDoc(letter)) : [{ type: "doc", content: [] }]), [letter]);
   const btns = letter?.buttons || {};
   const exp = letter?.settings?.experience || {};
-  const anim = animConfig(exp);
+  const anim = useMemo(() => animConfig(letter?.settings?.experience || {}), [letter]);
   // Honour reduced-motion: skip the heavy dissolve/ember finale, keep the quick fade.
   const emberOn = !!exp.emberDissolve && !perf.reducedMotion;
 
@@ -378,28 +379,17 @@ export default function ReaderPage({ params }) {
   );
 
   if (stage === "password") return (
-    <div style={base}><Grain /><Glow /><div style={{ ...wrap, textAlign: "center", maxWidth: 360 }}>
-      <p style={{ fontSize: 10, letterSpacing: 5, textTransform: "uppercase", color: t.dim, marginBottom: 28 }}>🔒 Protected Letter</p>
-      <input type="password" autoFocus value={pwInput} onChange={e => { setPwInput(e.target.value); setPwError(false); }}
-        onKeyDown={e => e.key === "Enter" && (gate.nameMode !== "off" ? setStage("name") : beginRead("", pwInput))}
-        placeholder="Enter password" style={{ width: "100%", textAlign: "center", padding: "12px", background: "transparent", border: `1px solid ${pwError ? "#e04040" : t.divider}`, color: t.text, borderRadius: 8, marginBottom: 16, fontSize: 14 }} />
-      {pwError && <p style={{ color: "#e04040", fontSize: 11, marginBottom: 12 }}>Incorrect password</p>}
-      <button style={resolveButtonStyle(btns.start, t, true)} onClick={() => gate.nameMode !== "off" ? setStage("name") : beginRead("", pwInput)}>Continue</button>
-    </div></div>
+    <div style={base}><Grain /><Glow />
+      <PasswordGate t={t} wrap={wrap} btns={btns} error={pwError}
+        onSubmit={(pw) => { setPwInput(pw); setPwError(false); if (gate.nameMode !== "off") setStage("name"); else beginRead("", pw); }} />
+    </div>
   );
 
   if (stage === "name") return (
-    <div style={base}><Grain /><Glow /><div style={{ ...wrap, textAlign: "center", maxWidth: 360 }}>
-      <p style={{ fontSize: 10, letterSpacing: 5, textTransform: "uppercase", color: t.dim, marginBottom: 28 }}>Before you open this</p>
-      <p style={{ color: t.text, fontSize: 18, fontStyle: "italic", marginBottom: 20 }}>What should we call you?</p>
-      <input autoFocus value={nameInput} onChange={e => setNameInput(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && (nameInput.trim() || gate.nameMode === "optional") && beginRead(nameInput.trim(), pwInput)}
-        placeholder="Your name" style={{ width: "100%", textAlign: "center", padding: "12px", background: "transparent", border: `1px solid ${t.divider}`, color: t.text, borderRadius: 8, marginBottom: 16, fontSize: 14 }} />
-      <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-        <button style={resolveButtonStyle(btns.start, t, true)} onClick={() => (nameInput.trim() || gate.nameMode === "optional") && beginRead(nameInput.trim(), pwInput)}>Continue</button>
-        {gate.nameMode === "optional" && <button style={resolveButtonStyle(btns.start, t, false)} onClick={() => beginRead("", pwInput)}>Skip</button>}
-      </div>
-    </div></div>
+    <div style={base}><Grain /><Glow />
+      <NameGate t={t} wrap={wrap} btns={btns} optional={gate.nameMode === "optional"}
+        onSubmit={(name) => beginRead(name, pwInput)} onSkip={() => beginRead("", pwInput)} />
+    </div>
   );
 
   if (stage === "finishing") return (
@@ -466,6 +456,41 @@ export default function ReaderPage({ params }) {
               : <button style={resolveButtonStyle(btns.readMore, t, false)} onClick={next}>{btns.readMore?.label || "Read More →"}</button>}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Password / name gates hold their OWN input state so typing re-renders only this
+// small card — not the whole reader (which would re-derive theme/pages per keystroke
+// and feel laggy on phones).
+function PasswordGate({ t, wrap, btns, error, onSubmit }) {
+  const [pw, setPw] = useState("");
+  return (
+    <div style={{ ...wrap, textAlign: "center", maxWidth: 360 }}>
+      <p style={{ fontSize: 10, letterSpacing: 5, textTransform: "uppercase", color: t.dim, marginBottom: 28 }}>🔒 Protected Letter</p>
+      <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && onSubmit(pw)}
+        placeholder="Enter password" style={{ width: "100%", textAlign: "center", padding: "12px", background: "transparent", border: `1px solid ${error ? "#e04040" : t.divider}`, color: t.text, borderRadius: 8, marginBottom: 16, fontSize: 14 }} />
+      {error && <p style={{ color: "#e04040", fontSize: 11, marginBottom: 12 }}>Incorrect password</p>}
+      <button style={resolveButtonStyle(btns.start, t, true)} onClick={() => onSubmit(pw)}>Continue</button>
+    </div>
+  );
+}
+
+function NameGate({ t, wrap, btns, optional, onSubmit, onSkip }) {
+  const [name, setName] = useState("");
+  const go = () => { if (name.trim() || optional) onSubmit(name.trim()); };
+  return (
+    <div style={{ ...wrap, textAlign: "center", maxWidth: 360 }}>
+      <p style={{ fontSize: 10, letterSpacing: 5, textTransform: "uppercase", color: t.dim, marginBottom: 28 }}>Before you open this</p>
+      <p style={{ color: t.text, fontSize: 18, fontStyle: "italic", marginBottom: 20 }}>What should we call you?</p>
+      <input autoFocus value={name} onChange={e => setName(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && go()}
+        placeholder="Your name" style={{ width: "100%", textAlign: "center", padding: "12px", background: "transparent", border: `1px solid ${t.divider}`, color: t.text, borderRadius: 8, marginBottom: 16, fontSize: 14 }} />
+      <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+        <button style={resolveButtonStyle(btns.start, t, true)} onClick={go}>Continue</button>
+        {optional && <button style={resolveButtonStyle(btns.start, t, false)} onClick={onSkip}>Skip</button>}
       </div>
     </div>
   );
