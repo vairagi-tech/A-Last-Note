@@ -32,7 +32,6 @@ export default function AdminPage() {
   const [selectedLog, setSelectedLog] = useState(null);
   const [logs, setLogs] = useState([]);
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [defaults, setDefaults] = useState({});
   const [creatingNew, setCreatingNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -62,24 +61,6 @@ export default function AdminPage() {
   }, [view, anLetterId]);
 
   useEffect(() => { if (!selectedLog) return; fetch(`/api/sessions/${selectedLog}`).then(r => r.json()).then(d => setLogs(d?.logs || [])).catch(() => setLogs([])); }, [selectedLog]);
-
-  // Copy a string to the clipboard with a fallback for browsers/contexts where
-  // navigator.clipboard is unavailable, plus visible "Copied!" feedback.
-  const copyText = async (text) => {
-    let ok = false;
-    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch { /* fall through */ }
-    if (!ok) {
-      try {
-        const ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.focus(); ta.select();
-        ok = document.execCommand("copy");
-        document.body.removeChild(ta);
-      } catch { ok = false; }
-    }
-    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1800); }
-    else { window.prompt("Copy this link:", text); }
-  };
 
   const upd = (patch) => setActive(p => ({ ...p, ...patch }));
   const updSettings = (patch) => setActive(p => ({ ...p, settings: { ...p.settings, ...patch } }));
@@ -236,7 +217,7 @@ export default function AdminPage() {
         {view === "home" && <HomePane name={CLERK_ON ? <WorkspaceName /> : "your"} letters={letters} createLetter={startNew} openEditor={openEditor} patchLetter={patchLetter} duplicateLetter={duplicateLetter} deleteLetter={setConfirmDel} renameLetter={renameLetter} appUrl={appUrl} defaults={defaults} saveDefaults={saveDefaults} />}
 
         {view === "editor" && active && (
-          <EditorPane {...{ active, setActive, theme, st, tab, setTab, save, saved, previewLetter, appUrl, upd, updSettings, updExp, updButton, updBtnStyle }} />
+          <EditorPane {...{ active, setActive, theme, st, tab, setTab, save, saved, previewLetter, appUrl, upd, updSettings, updExp, updLayout, updButton, updBtnStyle }} />
         )}
 
         {view === "analytics" && !anLetterId && <OverviewPane letters={letters} allSessions={allSessions} onOpen={(id) => { setAnLetterId(id); setSelectedLog(null); }} />}
@@ -403,8 +384,26 @@ function HomePane({ name, letters, createLetter, openEditor, patchLetter, duplic
 }
 
 // ════════════════ EDITOR ════════════════
-function EditorPane({ active, setActive, theme, st, tab, setTab, save, saved, previewLetter, appUrl, upd, updSettings, updExp, updButton, updBtnStyle }) {
+function EditorPane({ active, setActive, theme, st, tab, setTab, save, saved, previewLetter, appUrl, upd, updSettings, updExp, updLayout, updButton, updBtnStyle }) {
   const A = useTheme();  const ttab = t => `px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${tab === t ? "" : ""}`;
+  const [copied, setCopied] = useState(false);
+  // Copy with a fallback for browsers/contexts without navigator.clipboard, plus
+  // visible "Copied!" feedback.
+  const copyText = async (text) => {
+    let ok = false;
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch { /* fall through */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    else { window.prompt("Copy this link:", text); }
+  };
   return (
     <div>
       <div className="flex items-center gap-3 px-4 md:px-6 py-3 flex-wrap sticky top-0 z-20" style={{ borderBottom: `1px solid ${A.border}`, background: A.bg }}>
