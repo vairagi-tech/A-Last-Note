@@ -8,9 +8,13 @@ import { getDeviceProfile } from "@/lib/perf";
 import { LetterProseStyles } from "@/components/tiptap/proseStyles";
 import { StoryStyles, animConfig } from "@/components/tiptap/storyAnim";
 
-// Tiptap (text) + freestyle pages render client-side only.
-const LetterPage = dynamic(() => import("@/components/tiptap/LetterPage"), { ssr: false });
-const FreestylePage = dynamic(() => import("@/components/tiptap/FreestylePage"), { ssr: false });
+// Tiptap (text) + freestyle pages render client-side only. The import factories are
+// reused to warm (preload) these chunks during the landing screen so tapping Start
+// renders immediately instead of waiting on a chunk fetch.
+const importLetterPage = () => import("@/components/tiptap/LetterPage");
+const importFreestylePage = () => import("@/components/tiptap/FreestylePage");
+const LetterPage = dynamic(importLetterPage, { ssr: false });
+const FreestylePage = dynamic(importFreestylePage, { ssr: false });
 
 const BLOCKED_COPY = {
   disabled: "This letter is currently unavailable.",
@@ -75,12 +79,15 @@ export default function ReaderPage({ params }) {
     } catch { token.current = generateToken(); }
     ctx.current = getReaderContext();
     fp.current = getFingerprint();
-    probe();
+    open();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkId]);
 
-  const probe = async () => {
-    // Owner preview: fetch the letter directly (no gates, no counting) and read.
+  // Open the letter in ONE request. The read endpoint gates server-side and returns
+  // a `blocked` reason ("password"/"name") BEFORE committing a read, so a direct
+  // beginRead doubles as the gate probe — no separate round-trip. Ungated letters
+  // therefore load in a single request.
+  const open = async () => {
     if (previewRef.current) {
       try {
         const r = await fetch(`/api/letters/${linkId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview: true }) });
@@ -89,15 +96,7 @@ export default function ReaderPage({ params }) {
         setLetter(d.letter); setStage("landing"); return;
       } catch { setBlockReason("notfound"); setStage("blocked"); return; }
     }
-    try {
-      const r = await fetch(`/api/letters/${linkId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ probe: true, readerToken: token.current, fingerprint: fp.current }) });
-      const d = await r.json();
-      if (d.blocked) { setBlockReason(d.reason); setOpensAt(d.opensAt || null); setStage("blocked"); return; }
-      setGate({ needsPassword: d.needsPassword, nameMode: d.nameMode });
-      if (d.needsPassword) setStage("password");
-      else if (d.nameMode !== "off") setStage("name");
-      else beginRead("", "");
-    } catch { setBlockReason("notfound"); setStage("blocked"); }
+    beginRead("", "");
   };
 
   const beginRead = async (name, password) => {
@@ -108,8 +107,9 @@ export default function ReaderPage({ params }) {
       });
       const d = await r.json();
       if (d.blocked) {
-        if (d.reason === "password") { setPwError(true); setStage("password"); return; }
-        if (d.reason === "name") { setStage("name"); return; }
+        // gate-before-commit: show the right gate. pwError only after a real attempt.
+        if (d.reason === "password") { setPwError(!!password); setStage("password"); return; }
+        if (d.reason === "name") { setGate(g => ({ ...g, nameMode: d.nameMode || "required" })); setStage("name"); return; }
         setBlockReason(d.reason); setOpensAt(d.opensAt || null); setStage("blocked"); return;
       }
       readerName.current = name || "";
@@ -264,6 +264,12 @@ export default function ReaderPage({ params }) {
     if (stage === "reading") { try { window.scrollTo(0, 0); } catch {} }
   }, [idx, stage]);
 
+  // Warm the content chunks while the reader looks at the landing screen, so Start
+  // renders instantly. Cheap and idempotent (the import is cached after the first).
+  useEffect(() => {
+    if (stage === "landing") { importLetterPage(); importFreestylePage(); }
+  }, [stage]);
+
   const recordPageTime = () => {
     pageTimes.current.push({ page: idx, title: `Page ${idx + 1}`, seconds: Math.floor((Date.now() - pStart.current) / 1000), enteredAt: pStart.current });
   };
@@ -364,7 +370,16 @@ export default function ReaderPage({ params }) {
   // ─── stages ───
   if (stage === "destroyed") return <div style={{ background: "#000", width: "100%", minHeight: "100vh" }} />;
 
-  if (stage === "loading") return <div style={base}><p style={{ color: t.dim, fontStyle: "italic" }}>Loading…</p></div>;
+  if (stage === "loading") return (
+    <div style={base}><Grain /><Glow />
+      <div style={{ ...wrap, textAlign: "center" }} className="animate-pulse-slow">
+        <div style={{ fontSize: 10, letterSpacing: 5, textTransform: "uppercase", color: t.dim, marginBottom: 40 }}>A Letter For You</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "center" }}>
+          {[80, 64, 72].map((w, i) => <div key={i} style={{ width: `${w}%`, height: 12, borderRadius: 6, background: t.divider, opacity: 0.5 }} />)}
+        </div>
+      </div>
+    </div>
+  );
 
   if (stage === "blocked") return (
     <div style={base}><Grain /><Glow /><div style={{ textAlign: "center", zIndex: 1, maxWidth: 380 }}>
@@ -381,7 +396,7 @@ export default function ReaderPage({ params }) {
   if (stage === "password") return (
     <div style={base}><Grain /><Glow />
       <PasswordGate t={t} wrap={wrap} btns={btns} error={pwError}
-        onSubmit={(pw) => { setPwInput(pw); setPwError(false); if (gate.nameMode !== "off") setStage("name"); else beginRead("", pw); }} />
+        onSubmit={(pw) => { setPwInput(pw); setPwError(false); beginRead("", pw); }} />
     </div>
   );
 

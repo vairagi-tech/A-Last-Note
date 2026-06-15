@@ -85,7 +85,17 @@ function Block({ node }) {
     case "codeBlock": return <pre><code><Inline content={node.content} /></code></pre>;
     case "horizontalRule": return <hr />;
     case "hardBreak": return <br />;
-    case "image": return <img src={a.src} alt={a.alt || ""} {...(a.bleed ? { "data-bleed": "true" } : {})} />;
+    case "image": return (
+      <img
+        src={a.src}
+        alt={a.alt || ""}
+        loading="lazy"
+        decoding="async"
+        {...(a.width && a.height ? { width: a.width, height: a.height } : {})}
+        style={a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}`, height: "auto" } : undefined}
+        {...(a.bleed ? { "data-bleed": "true" } : {})}
+      />
+    );
     case "video": return <VideoNode attrs={a} />;
     case "embed": return <EmbedNode attrs={a} />;
     case "audio": return <div style={{ margin: "14px 0" }}><AudioPlayer src={a.src} title={a.title} color={a.color} interactive /></div>;

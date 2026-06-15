@@ -146,6 +146,18 @@ const BleedImage = Image.extend({
         parseHTML: el => el.getAttribute("data-bleed") === "true",
         renderHTML: attrs => (attrs.bleed ? { "data-bleed": "true" } : {}),
       },
+      // Intrinsic pixel dimensions, stored so the reader can reserve the image box
+      // (no layout shift / reflow as images load). Optional — older images lack them.
+      width: {
+        default: null,
+        parseHTML: el => { const v = el.getAttribute("width"); return v ? Number(v) : null; },
+        renderHTML: attrs => (attrs.width ? { width: attrs.width } : {}),
+      },
+      height: {
+        default: null,
+        parseHTML: el => { const v = el.getAttribute("height"); return v ? Number(v) : null; },
+        renderHTML: attrs => (attrs.height ? { height: attrs.height } : {}),
+      },
     };
   },
 });

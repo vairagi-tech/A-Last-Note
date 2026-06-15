@@ -8,7 +8,7 @@ import { FONT_OPTIONS } from "@/lib/themes";
 import { cloudinaryEnabled, uploadToCloudinary } from "@/lib/cloudinary";
 import { resolveImport } from "@/lib/embed";
 import { pdfToPages } from "@/lib/pdfSplit";
-import { compressToDataUrl, compressToFile } from "@/lib/imageCompress";
+import { compressToDataUrl, compressToFile, compressToResult, getImageSize } from "@/lib/imageCompress";
 import { LetterProseStyles } from "@/components/tiptap/proseStyles";
 import FreestyleBoard from "@/components/tiptap/FreestyleBoard";
 
@@ -32,10 +32,12 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     setBusy(true);
     try {
       for (const file of files) {
-        let src;
-        if (cloudinaryEnabled()) { try { src = await uploadToCloudinary(await compressToFile(file), "image"); } catch { src = await compressToDataUrl(file); } }
-        else src = await compressToDataUrl(file);
-        const node = view.state.schema.nodes.image.create({ src });
+        let src, width = null, height = null;
+        if (cloudinaryEnabled()) {
+          try { const dims = await getImageSize(file); width = dims.width; height = dims.height; src = await uploadToCloudinary(await compressToFile(file), "image"); }
+          catch { const r = await compressToResult(file); src = r.src; width = r.width; height = r.height; }
+        } else { const r = await compressToResult(file); src = r.src; width = r.width; height = r.height; }
+        const node = view.state.schema.nodes.image.create({ src, width, height });
         view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
       }
     } finally { setBusy(false); }
@@ -61,7 +63,11 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
   const pd = (e) => e.preventDefault();
   const uploadImage = async (file) => {
     setBusy(true);
-    try { const url = await uploadToCloudinary(await compressToFile(file), "image"); editor.chain().focus().setImage({ src: url }).run(); }
+    try {
+      const dims = await getImageSize(file);
+      const url = await uploadToCloudinary(await compressToFile(file), "image");
+      editor.chain().focus().setImage({ src: url, width: dims.width, height: dims.height }).run();
+    }
     catch (e) { alert(e.message); }
     setBusy(false);
   };
@@ -90,7 +96,7 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     try {
       const pages = await pdfToPages(source, { onProgress: (done, total) => setImporting({ done, total }) });
       if (!pages.length) throw new Error("That PDF had no pages.");
-      insertPages(pages.map(p => ({ type: "image", attrs: { src: p.dataUrl, bleed: true } })));
+      insertPages(pages.map(p => ({ type: "image", attrs: { src: p.dataUrl, bleed: true, width: p.w, height: p.h } })));
     } catch (e) { alert(e.message || "Couldn't import that PDF."); }
     setImporting(null);
   };
@@ -101,8 +107,10 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return importPdf(file);
     setUrlCfg(null); setBusy(true);
     try {
-      const src = cloudinaryEnabled() ? await uploadToCloudinary(await compressToFile(file), "image") : await compressToDataUrl(file);
-      insertPages([{ type: "image", attrs: { src, bleed: true } }]);
+      let src, width = null, height = null;
+      if (cloudinaryEnabled()) { const dims = await getImageSize(file); width = dims.width; height = dims.height; src = await uploadToCloudinary(await compressToFile(file), "image"); }
+      else { const r = await compressToResult(file); src = r.src; width = r.width; height = r.height; }
+      insertPages([{ type: "image", attrs: { src, bleed: true, width, height } }]);
     } catch (e) { alert(e.message); }
     setBusy(false);
   };

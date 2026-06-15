@@ -29,10 +29,29 @@ function loadImage(file) {
   });
 }
 
+// Natural pixel dimensions of an image file (for the Cloudinary path, where we
+// upload a File and still want to store width/height on the node). Returns nulls
+// for non-raster images (GIF/SVG) or on failure.
+export async function getImageSize(file) {
+  if (!isCompressibleImage(file)) return { width: null, height: null };
+  try {
+    const img = await loadImage(file);
+    return { width: img.naturalWidth || img.width || null, height: img.naturalHeight || img.height || null };
+  } catch {
+    return { width: null, height: null };
+  }
+}
+
 // Returns a data URL string, recompressed when worthwhile, else the original bytes.
 export async function compressToDataUrl(file, opts = {}) {
+  return (await compressToResult(file, opts)).src;
+}
+
+// Like compressToDataUrl but also returns the rendered {width,height} so callers
+// can store image dimensions (lets the reader reserve the box → no layout shift).
+export async function compressToResult(file, opts = {}) {
   const { maxWidth, maxHeight, quality } = { ...DEFAULTS, ...opts };
-  if (!isCompressibleImage(file)) return fileToDataUrl(file);
+  if (!isCompressibleImage(file)) return { src: await fileToDataUrl(file), width: null, height: null };
   try {
     const img = await loadImage(file);
     const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
@@ -46,10 +65,11 @@ export async function compressToDataUrl(file, opts = {}) {
     let out = canvas.toDataURL("image/webp", quality);
     if (!out.startsWith("data:image/webp")) out = canvas.toDataURL("image/jpeg", quality);
     const orig = await fileToDataUrl(file);
-    // Only keep the recompressed version if it actually came out smaller.
-    return out.length < orig.length ? out : orig;
+    // Only keep the recompressed version if it actually came out smaller. Either
+    // way the rendered dimensions are w×h (the original is shown scaled by CSS).
+    return { src: out.length < orig.length ? out : orig, width: w, height: h };
   } catch {
-    return fileToDataUrl(file); // never block an insert on a compression failure
+    return { src: await fileToDataUrl(file), width: null, height: null };
   }
 }
 
