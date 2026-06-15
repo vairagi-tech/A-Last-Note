@@ -82,6 +82,13 @@ export async function POST(req) {
         drm: body.settings?.drm || false,
         holdToReveal: body.settings?.holdToReveal || false,
         endMessage: body.settings?.endMessage || "",
+        layout: {
+          vAlign: body.settings?.layout?.vAlign || "center",
+          width: body.settings?.layout?.width || "normal",
+          contentWidth: body.settings?.layout?.contentWidth ?? null,
+          topOffset: body.settings?.layout?.topOffset ?? null,
+          sidePadding: body.settings?.layout?.sidePadding ?? null,
+        },
         experience: {
           breathPace: body.settings?.experience?.breathPace || 0,
           emberDissolve: body.settings?.experience?.emberDissolve || false,

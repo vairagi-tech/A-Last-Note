@@ -99,6 +99,15 @@ export const DEFAULT_SETTINGS = {
   drm: false,           // protection mode: blackout on capture / focus loss
   holdToReveal: false,  // content blurred unless pressed-and-held
   endMessage: "",       // reader's final fade text (default applied at render)
+  // ─── Reading-window position (where the letter sits in the reader viewport) ───
+  // Any field left null inherits: per-letter → workspace default → system default.
+  layout: {
+    vAlign: "center",   // "top" | "center" | "bottom" — vertical placement
+    width: "normal",    // "narrow" | "normal" | "wide" — preset, mapped to px
+    contentWidth: null, // fine-tune: explicit px (overrides the width preset)
+    topOffset: null,    // fine-tune: explicit top padding px
+    sidePadding: null,  // fine-tune: explicit horizontal padding px
+  },
   // ─── Experience: each idea is an opt-in toggle; off = original behavior ───
   experience: {
     breathPace: 0,         // legacy "breathing reveal" — maps to a slow block fade
@@ -114,6 +123,36 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const DEFAULT_EXPERIENCE = { breathPace: 0, emberDissolve: false, sealedFrom: null, minimalAnalytics: false, blockReveal: "none", revealStagger: null, wordAnim: "none", wordStagger: 0.04 };
+
+// Reading-window layout defaults + width presets (px).
+export const DEFAULT_LAYOUT = { vAlign: "center", width: "normal", contentWidth: null, topOffset: null, sidePadding: null };
+export const WIDTH_PRESETS = { narrow: 460, normal: 560, wide: 720 };
+
+// Resolve the effective reading-window layout by cascading:
+//   per-letter layout → workspace default layout → system default.
+// Each field falls back independently, so a letter that only sets vAlign still
+// inherits the workspace width, etc. Returns concrete render values.
+export function resolveLayout(letterLayout, defaultLayout) {
+  const pick = (k) => {
+    const a = letterLayout && letterLayout[k];
+    if (a !== undefined && a !== null && a !== "") return a;
+    const b = defaultLayout && defaultLayout[k];
+    if (b !== undefined && b !== null && b !== "") return b;
+    return DEFAULT_LAYOUT[k];
+  };
+  const vAlign = pick("vAlign");
+  const widthKey = pick("width");
+  const contentWidth = pick("contentWidth"); // may stay null → caller falls back to theme
+  return {
+    vAlign,
+    align: { top: "flex-start", center: "center", bottom: "flex-end" }[vAlign] || "center",
+    widthKey,
+    presetWidth: WIDTH_PRESETS[widthKey] || WIDTH_PRESETS.normal,
+    contentWidth: contentWidth != null ? Number(contentWidth) : null,
+    topOffset: (() => { const v = pick("topOffset"); return v != null ? Number(v) : null; })(),
+    sidePadding: (() => { const v = pick("sidePadding"); return v != null ? Number(v) : null; })(),
+  };
+}
 
 export function newLetter() {
   return {

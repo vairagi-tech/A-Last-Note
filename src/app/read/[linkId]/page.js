@@ -2,8 +2,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { getTheme, resolveButtonStyle } from "@/lib/themes";
-import { generateId, generateToken, formatTime, getReaderContext, getFingerprint } from "@/lib/utils";
+import { generateId, generateToken, formatTime, getReaderContext, getFingerprint, resolveLayout } from "@/lib/utils";
 import { getLetterDoc, splitDocIntoPages, themeToVars, isFreestylePage } from "@/lib/letterDoc";
+import { getDeviceProfile } from "@/lib/perf";
 import { LetterProseStyles } from "@/components/tiptap/proseStyles";
 import { StoryStyles, animConfig } from "@/components/tiptap/storyAnim";
 
@@ -37,6 +38,9 @@ export default function ReaderPage({ params }) {
   const [opensAt, setOpensAt] = useState(null);    // sealed-until date (when blocked "sealed")
   const minimalRef = useRef(false);                // tender-analytics mode
   const previewRef = useRef(false);                // owner preview — never counts
+  // Device profile: one switch the heavy effects read so this can't regress.
+  // Starts "lite" (cheap) for SSR/first paint, resolved on mount.
+  const [perf, setPerf] = useState({ coarse: false, reducedMotion: false, smallScreen: false, animate: false, lite: true });
 
   const sid = useRef(generateId());
   const token = useRef("");
@@ -63,6 +67,7 @@ export default function ReaderPage({ params }) {
 
   // Reader identity token (stable across visits)
   useEffect(() => {
+    setPerf(getDeviceProfile());
     try { previewRef.current = new URLSearchParams(window.location.search).get("preview") === "1"; } catch {}
     try {
       let t = localStorage.getItem("lp_reader");
@@ -211,19 +216,52 @@ export default function ReaderPage({ params }) {
   const btns = letter?.buttons || {};
   const exp = letter?.settings?.experience || {};
   const anim = animConfig(exp);
-  const emberOn = !!exp.emberDissolve;
+  // Honour reduced-motion: skip the heavy dissolve/ember finale, keep the quick fade.
+  const emberOn = !!exp.emberDissolve && !perf.reducedMotion;
 
-  const fade = (cb) => { setShow(false); setTimeout(() => { cb(); setTimeout(() => setShow(true), 80); }, 500); };
-
-  const onScroll = () => {
-    const el = scrollRef.current; if (!el) return;
-    const pct = Math.min(100, Math.round(((el.scrollTop + el.clientHeight) / el.scrollHeight) * 100));
-    const prev = scrollByPage.current[idx] || 0;
-    if (pct > prev) {
-      scrollByPage.current[idx] = pct;
-      [25, 50, 75, 100].forEach(m => { if (prev < m && pct >= m) log("scroll_milestone", `${m}% of page ${idx + 1}`, idx); });
-    }
+  // Page-turn crossfade. Was a 500ms blackout before the page even changed —
+  // which read as "the button is laggy". Now it's a quick ~160ms fade, and instant
+  // under reduced-motion. The button responds immediately.
+  const fade = (cb) => {
+    if (perf.reducedMotion) { cb(); setShow(true); return; }
+    setShow(false);
+    setTimeout(() => { cb(); requestAnimationFrame(() => setShow(true)); }, 160);
   };
+
+  // Scroll-depth tracking on the DOCUMENT (the page scrolls natively now, not an
+  // inner overflow box). Throttled via rAF + a time gate so a fast mobile scroll
+  // never fires log()/fetch() on every frame.
+  const scrollIdle = useRef(true);
+  const lastScrollLog = useRef(0);
+  const measureScroll = useCallback(() => {
+    scrollIdle.current = true;
+    const doc = document.documentElement;
+    const scrollable = doc.scrollHeight - window.innerHeight;
+    const pct = scrollable <= 0 ? 100 : Math.min(100, Math.round((window.scrollY / scrollable) * 100));
+    const prev = scrollByPage.current[idx] || 0;
+    if (pct <= prev) return;
+    scrollByPage.current[idx] = pct;
+    const now = Date.now();
+    if (now - lastScrollLog.current < 250) return; // gate network churn
+    lastScrollLog.current = now;
+    [25, 50, 75, 100].forEach(m => { if (prev < m && pct >= m) log("scroll_milestone", `${m}% of page ${idx + 1}`, idx); });
+  }, [idx, log]);
+
+  useEffect(() => {
+    if (stage !== "reading") return;
+    const onScroll = () => {
+      if (!scrollIdle.current) return;
+      scrollIdle.current = false;
+      requestAnimationFrame(measureScroll);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [stage, measureScroll]);
+
+  // Each reader page starts at the top of the document (the page scrolls natively).
+  useEffect(() => {
+    if (stage === "reading") { try { window.scrollTo(0, 0); } catch {} }
+  }, [idx, stage]);
 
   const recordPageTime = () => {
     pageTimes.current.push({ page: idx, title: `Page ${idx + 1}`, seconds: Math.floor((Date.now() - pStart.current) / 1000), enteredAt: pStart.current });
@@ -259,7 +297,23 @@ export default function ReaderPage({ params }) {
   };
 
   // ─── shared chrome ───
-  const base = { fontFamily: t.bodyFont, minHeight: "100vh", width: "100%", background: t.bg, backgroundImage: t.bgImage ? `url(${t.bgImage})` : undefined, backgroundSize: "cover", display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px", position: "relative", overflow: "hidden",
+  // Reading-window placement. The workspace default is already merged under the
+  // letter's own layout server-side (read endpoint), so resolve directly here.
+  const llayout = letter?.settings?.layout || null;
+  const lay = resolveLayout(llayout, null);
+  // Width: explicit fine-tune px → explicit non-default preset → theme width → preset.
+  const maxW = lay.contentWidth != null
+    ? lay.contentWidth
+    : (llayout && llayout.width && llayout.width !== "normal")
+      ? lay.presetWidth
+      : (t.contentWidth || lay.presetWidth);
+  const padTop = lay.topOffset != null ? lay.topOffset : 48;
+  const padSide = lay.sidePadding != null ? lay.sidePadding : 24;
+  // The DOCUMENT scrolls natively (no inner overflow box). `100dvh` tracks the
+  // mobile address bar; `overflow` is NOT hidden so the page can always scroll.
+  // Column flex: justifyContent is the VERTICAL axis (top/center/bottom placement);
+  // alignItems is horizontal — always centered.
+  const base = { fontFamily: t.bodyFont, minHeight: "100dvh", width: "100%", background: t.bg, backgroundImage: t.bgImage ? `url(${t.bgImage})` : undefined, backgroundSize: "cover", backgroundAttachment: "fixed", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: lay.align, padding: `${padTop}px ${padSide}px ${Math.max(padTop, 64)}px`, position: "relative",
     ...(drm ? { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" } : {}) };
   const blurNow = drm && hold && !holding;
   const protFilter = blurNow ? "blur(18px)" : undefined;
@@ -267,9 +321,9 @@ export default function ReaderPage({ params }) {
     onMouseDown: () => setHolding(true), onMouseUp: () => setHolding(false), onMouseLeave: () => setHolding(false),
     onTouchStart: () => setHolding(true), onTouchEnd: () => setHolding(false), onTouchCancel: () => setHolding(false),
   } : {};
-  const wrap = { maxWidth: t.contentWidth || 560, width: "100%", position: "relative", zIndex: 1, opacity: show ? 1 : 0, transition: "opacity 0.5s ease" };
+  const wrap = { maxWidth: maxW, width: "100%", position: "relative", zIndex: 1, opacity: show ? 1 : 0, transition: "opacity 0.28s ease" };
   const Grain = () => t.grain ? <div className="animate-grain" style={{ position: "fixed", inset: "-50%", width: "200%", height: "200%", opacity: .12, pointerEvents: "none", zIndex: 0, backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.1'/%3E%3C/svg%3E")` }} /> : null;
-  const Glow = () => t.glowColor && t.glowColor !== "transparent" ? <div style={{ position: "fixed", top: "35%", left: "50%", transform: "translateX(-50%)", width: 500, height: 350, borderRadius: "50%", pointerEvents: "none", zIndex: 0, background: `radial-gradient(ellipse at center, ${t.glowColor} 0%, transparent 70%)` }} /> : null;
+  const Glow = () => t.glowColor && t.glowColor !== "transparent" ? <div style={{ position: "fixed", top: "35%", left: "50%", transform: "translateX(-50%)", width: perf.smallScreen ? 320 : 500, height: perf.smallScreen ? 240 : 350, borderRadius: "50%", pointerEvents: "none", zIndex: 0, background: `radial-gradient(ellipse at center, ${t.glowColor} 0%, transparent 70%)` }} /> : null;
   const Watermark = () => <div style={{ position: "fixed", bottom: 14, right: 18, fontSize: 8, letterSpacing: 2, color: t.divider, fontFamily: "monospace", zIndex: 2, userSelect: "none" }}>ID: {sid.current.slice(0, 8)}</div>;
   const PreviewBadge = () => previewRef.current ? <div style={{ position: "fixed", top: 12, left: 12, zIndex: 20, fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: t.bg, background: t.accent, padding: "4px 10px", borderRadius: 999, fontFamily: t.bodyFont, fontWeight: 600 }}>👁 Preview · not counted</div> : null;
   const ScreenshotOverlay = () => screenshotWarning ? (
@@ -286,12 +340,16 @@ export default function ReaderPage({ params }) {
   const ProtectionLayer = () => {
     if (!drm) return null;
     const mark = `${readerName.current || "private"} · ${sid.current.slice(0, 8)}`;
+    // Forensic watermark grid. On capable desktops it drifts slowly; on phones /
+    // reduced-motion it stays static (same deterrent, no per-frame repaint). Span
+    // count is bounded — 160 spans were a real scroll-cost on mobile.
+    const wmCount = perf.lite ? 28 : 70;
     return (
       <>
         <style>{`@media print { html, body { background:#000 !important; } body * { visibility:hidden !important; } }
           @keyframes lpfloat { 0%{transform:translate(-8%,-6%) rotate(-24deg)} 100%{transform:translate(8%,6%) rotate(-24deg)} }`}</style>
-        <div aria-hidden style={{ position: "fixed", inset: "-25%", zIndex: 4, pointerEvents: "none", opacity: 0.05, display: "flex", flexWrap: "wrap", gap: 36, animation: "lpfloat 9s ease-in-out infinite alternate", color: t.text, fontSize: 13, fontFamily: "monospace", lineHeight: 2.4 }}>
-          {Array.from({ length: 160 }).map((_, i) => <span key={i}>{mark}</span>)}
+        <div aria-hidden style={{ position: "fixed", inset: "-25%", zIndex: 4, pointerEvents: "none", opacity: 0.05, display: "flex", flexWrap: "wrap", gap: 36, transform: "rotate(-24deg)", animation: perf.animate ? "lpfloat 9s ease-in-out infinite alternate" : undefined, color: t.text, fontSize: 13, fontFamily: "monospace", lineHeight: 2.4 }}>
+          {Array.from({ length: wmCount }).map((_, i) => <span key={i}>{mark}</span>)}
         </div>
         {captured && (
           <div style={{ position: "fixed", inset: 0, zIndex: 2147483647, background: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -372,11 +430,10 @@ export default function ReaderPage({ params }) {
   // render 1:1 on desktop; FreestylePage scales itself down to fit phones.
   const freestyleNow = isFreestylePage(pages[idx]);
   const readWrap = freestyleNow ? { ...wrap, maxWidth: Math.max(wrap.maxWidth || 560, 600) } : wrap;
-  // Freestyle "cards" are a fixed-width canvas scaled to fit. On a phone, use the
-  // full width (less side padding → the card renders bigger) and keep it centred
-  // so the empty space is balanced top/bottom rather than drifting low.
+  // Freestyle "cards" are a fixed-width canvas scaled to fit — use less side padding
+  // so the card renders bigger, while still honouring the chosen vertical placement.
   const readBase = freestyleNow
-    ? { ...base, padding: "16px 8px" }
+    ? { ...base, padding: `${Math.min(padTop, 16)}px 8px 64px` }
     : base;
 
   return (
@@ -390,17 +447,17 @@ export default function ReaderPage({ params }) {
       </div>
       <div style={{ position: "fixed", top: 14, right: 18, fontSize: 10, letterSpacing: 3, color: t.dim, zIndex: 10, fontFamily: t.bodyFont }}>{idx + 1} / {pages.length}</div>
       {drm && hold && !holding && <div style={{ position: "fixed", bottom: 16, left: 0, width: "100%", textAlign: "center", fontSize: 10, letterSpacing: 2, color: t.dim, zIndex: 10 }}>🔒 press &amp; hold to read</div>}
-      {dissolving && <EmberOverlay t={t} />}
+      {dissolving && <EmberOverlay t={t} lite={perf.lite} />}
 
-      <div ref={scrollRef} onScroll={onScroll} {...holdProps} style={{ ...readWrap, ...themeToVars(t), maxHeight: "calc(100vh - 96px)", overflowX: "hidden", overflowY: "auto", filter: protFilter, transition: "filter 0.2s", animation: dissolving ? "lpDissolve 2.6s ease-in forwards" : undefined }}>
+      <div ref={scrollRef} {...holdProps} style={{ ...readWrap, ...themeToVars(t), filter: protFilter, transition: "filter 0.2s", animation: dissolving ? "lpDissolve 2.6s ease-in forwards" : undefined }}>
         {pages.length > 1 && (
           <div style={{ fontSize: 10, letterSpacing: 4, color: t.divider, marginBottom: freestyleNow ? 14 : 36, textAlign: "center" }}>
             — {["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][idx] || idx + 1} —
           </div>
         )}
         {isFreestylePage(pages[idx])
-          ? <FreestylePage key={idx} pageDoc={pages[idx]} anim={anim} />
-          : <LetterPage key={idx} pageDoc={pages[idx]} anim={anim} />}
+          ? <FreestylePage key={idx} pageDoc={pages[idx]} anim={anim} lite={perf.lite} />
+          : <LetterPage key={idx} pageDoc={pages[idx]} anim={anim} lite={perf.lite} />}
         <div style={{ width: "100%", height: 1, background: `linear-gradient(to right, transparent, ${t.divider}60, transparent)`, marginTop: 16, marginBottom: 32 }} />
         {!dissolving && (
           <div style={{ textAlign: "center" }}>
@@ -415,10 +472,13 @@ export default function ReaderPage({ params }) {
 }
 
 // Embers rising as the letter dissolves. Varied by index (no Math.random — SSR-safe).
-function EmberOverlay({ t }) {
+// The glow is a radial-gradient background, not box-shadow (box-shadow on dozens of
+// animated nodes was a real mobile repaint cost); count is reduced on phones.
+function EmberOverlay({ t, lite }) {
+  const count = lite ? 16 : 34;
   return (
     <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 6, pointerEvents: "none", overflow: "hidden" }}>
-      {Array.from({ length: 34 }).map((_, i) => {
+      {Array.from({ length: count }).map((_, i) => {
         const left = (i * 37) % 100;
         const delay = (i % 11) * 0.16;
         const size = 3 + (i % 5);
@@ -426,9 +486,9 @@ function EmberOverlay({ t }) {
         return (
           <span key={i} style={{
             position: "absolute", bottom: `${10 + (i % 7) * 6}%`, left: `${left}%`,
-            width: size, height: size, borderRadius: "50%",
-            background: t.accent, boxShadow: `0 0 ${size * 2}px ${t.accent}`,
-            opacity: 0, animation: `lpEmber ${dur}s ease-out ${delay}s forwards`,
+            width: size * 3, height: size * 3, borderRadius: "50%",
+            background: `radial-gradient(circle, ${t.accent} 0%, transparent 70%)`,
+            opacity: 0, willChange: "transform, opacity", animation: `lpEmber ${dur}s ease-out ${delay}s forwards`,
           }} />
         );
       })}

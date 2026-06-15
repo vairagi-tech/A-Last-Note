@@ -65,6 +65,7 @@ export default function AdminPage() {
   const upd = (patch) => setActive(p => ({ ...p, ...patch }));
   const updSettings = (patch) => setActive(p => ({ ...p, settings: { ...p.settings, ...patch } }));
   const updExp = (patch) => setActive(p => ({ ...p, settings: { ...p.settings, experience: { ...(p.settings?.experience || {}), ...patch } } }));
+  const updLayout = (patch) => setActive(p => ({ ...p, settings: { ...p.settings, layout: { ...(p.settings?.layout || {}), ...patch } } }));
   const updButton = (key, patch) => setActive(p => { const base = p.buttons || DEFAULT_BUTTONS; const cur = base[key] || { label: "", style: {} }; return { ...p, buttons: { ...base, [key]: { ...cur, ...patch } } }; });
   const updBtnStyle = (key, patch) => setActive(p => { const base = p.buttons || DEFAULT_BUTTONS; const cur = base[key] || { label: "", style: {} }; return { ...p, buttons: { ...base, [key]: { ...cur, style: { ...(cur.style || {}), ...patch } } } }; });
 
@@ -87,6 +88,7 @@ export default function AdminPage() {
     if (t.doc) { base.doc = t.doc; base.blocks = []; }
     if (t.buttons) base.buttons = { ...base.buttons, ...t.buttons };
     base.settings.experience = { ...base.settings.experience, ...(defaults.experience || {}), ...(t.experience || {}) };
+    base.settings.layout = { ...base.settings.layout, ...(defaults.layout || {}) };
     const res = await fetch("/api/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(base) }).catch(() => null);
     if (!res || !res.ok) {
       alert("Couldn't create the letter. " + (res?.status === 401
@@ -335,6 +337,9 @@ function HomePane({ name, letters, createLetter, openEditor, patchLetter, duplic
             <Toggle val={!!exp.emberDissolve} toggle={() => saveDefaults({ ...defaults, experience: { ...exp, emberDissolve: !exp.emberDissolve } })} /></Row>
           <Row label="🕯 Default tender analytics" sub="">
             <Toggle val={!!exp.minimalAnalytics} toggle={() => saveDefaults({ ...defaults, experience: { ...exp, minimalAnalytics: !exp.minimalAnalytics } })} /></Row>
+          <p className="text-[10px] tracking-widest uppercase mb-2 mt-5" style={{ color: A.dim }}>📐 Default reading position</p>
+          <p className="text-[11px] mb-3" style={{ color: A.dim }}>Applies to every letter that doesn&rsquo;t set its own position.</p>
+          <LayoutControls layout={defaults.layout} on={patch => saveDefaults({ ...defaults, layout: { ...(defaults.layout || {}), ...patch } })} />
         </div>
       )}
 
@@ -454,6 +459,10 @@ function EditorPane({ active, setActive, theme, st, tab, setTab, save, saved, pr
                 <Row label="🕯  Tender analytics" sub="Replace forensic tracking with one signal: did it land?">
                   <Toggle val={!!exp.minimalAnalytics} toggle={() => updExp({ minimalAnalytics: !exp.minimalAnalytics })} /></Row>
               </div>
+
+              <label className="text-[10px] tracking-widest uppercase block mb-2 mt-5" style={{ color: A.dim }}>📐 Reading position</label>
+              <p className="text-[11px] mb-3" style={{ color: A.dim }}>Where the letter sits when it&rsquo;s read — on a phone and on a laptop.</p>
+              <LayoutControls layout={st.layout} on={updLayout} />
 
               <label className="text-[10px] tracking-widest uppercase block mb-2 mt-5" style={{ color: A.dim }}>✨ Story Animation</label>
               <div className="rounded-xl p-5 mb-3" style={{ background: A.card, border: `1px solid ${A.border}` }}>
@@ -761,6 +770,43 @@ function NumField({ label, val, on }) {
 }
 function Row({ label, sub, children }) {
   const A = useTheme();  return (<div className="flex items-center justify-between py-3 gap-3" style={{ borderBottom: `1px solid ${A.border}` }}><div><p className="text-xs" style={{ color: A.bright }}>{label}</p>{sub && <p className="text-[11px]" style={{ color: A.dim }}>{sub}</p>}</div>{children}</div>);
+}
+// Segmented button group (Top / Center / Bottom etc.)
+function Seg({ value, options, on }) {
+  const A = useTheme();
+  return (
+    <div className="flex gap-1 flex-wrap justify-end">
+      {options.map(([v, l]) => (
+        <button key={v} onClick={() => on(v)} className="text-[11px] px-2.5 py-1.5 rounded-lg" style={{ background: value === v ? A.accent : "transparent", color: value === v ? A.onAccent : A.dim, border: `1px solid ${value === v ? A.accent : A.border}` }}>{l}</button>
+      ))}
+    </div>
+  );
+}
+// Reading-window position controls — shared by the per-letter Experience tab and
+// the workspace "Defaults for new letters" panel. `layout` is the current value,
+// `on(patch)` merges a partial update.
+function LayoutControls({ layout, on }) {
+  const A = useTheme();
+  const L = layout || {};
+  return (
+    <div className="rounded-xl p-5" style={{ background: A.card, border: `1px solid ${A.border}` }}>
+      <Row label="Vertical position" sub="Where the letter sits on the reader's screen">
+        <Seg value={L.vAlign || "center"} on={v => on({ vAlign: v })} options={[["top", "Top"], ["center", "Center"], ["bottom", "Bottom"]]} />
+      </Row>
+      <Row label="Width" sub="How wide the reading column is">
+        <Seg value={L.width || "normal"} on={v => on({ width: v })} options={[["narrow", "Narrow"], ["normal", "Normal"], ["wide", "Wide"]]} />
+      </Row>
+      <details className="mt-3">
+        <summary className="text-[11px] cursor-pointer" style={{ color: A.dim }}>Fine-tune (optional)</summary>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <NumField label="Content width px" val={L.contentWidth ?? undefined} on={v => on({ contentWidth: v ?? null })} />
+          <NumField label="Top offset px" val={L.topOffset ?? undefined} on={v => on({ topOffset: v ?? null })} />
+          <NumField label="Side padding px" val={L.sidePadding ?? undefined} on={v => on({ sidePadding: v ?? null })} />
+        </div>
+        <p className="text-[10px] mt-2" style={{ color: A.dim }}>Blank = use the preset. Content width overrides the Width buttons.</p>
+      </details>
+    </div>
+  );
 }
 function ltag(type) {
   const colors = { open: "#34d399", name_submitted: "#22d3ee", start: "#d8a24a", next: "#e0b86a", page_view: "#caa05a", click: "#c9a06a", scroll_milestone: "#60a5fa", idle: "#fbbf24", tab_blur: "#e04040", finish: "#d4903a", screenshot_attempt: "#e04040", copy_attempt: "#e04040" };

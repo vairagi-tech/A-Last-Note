@@ -25,7 +25,15 @@ export default function FreestylePage({ pageDoc, anim }) {
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => { const w = el.clientWidth; if (w) setScale(Math.min(1, w / CANVAS_W)); };
+    // Only commit a new scale when it actually changes (rounded) — otherwise the
+    // mobile address bar showing/hiding fires the observer constantly and churns
+    // re-renders of the whole canvas during scroll.
+    const measure = () => {
+      const w = el.clientWidth;
+      if (!w) return;
+      const next = Math.round(Math.min(1, w / CANVAS_W) * 1000) / 1000;
+      setScale(prev => (prev === next ? prev : next));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);

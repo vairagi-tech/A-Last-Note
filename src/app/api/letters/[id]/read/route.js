@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { getLetters, getReaders } from "@/lib/mongodb";
+import { getLetters, getReaders, getUserSettings } from "@/lib/mongodb";
 import { evaluateAccess } from "@/lib/gate";
 import { verifyPassword } from "@/lib/password";
 import { requireOwner, ownsLetter } from "@/lib/auth";
@@ -10,6 +10,30 @@ function publicLetter(letter) {
   const { settings, ownerId, ...rest } = letter;
   const { password, ...safe } = settings || {};
   return { ...rest, settings: { ...safe, hasPassword: !!password } };
+}
+
+// Reading-window layout cascade: a letter's own layout fields win; any field the
+// letter leaves unset inherits the owner's workspace default. The reader then
+// fills remaining gaps with the system default. Returns the letter with a fully
+// merged settings.layout so existing letters follow the workspace default live.
+const LAYOUT_KEYS = ["vAlign", "width", "contentWidth", "topOffset", "sidePadding"];
+async function withWorkspaceLayout(letter) {
+  try {
+    if (!letter?.ownerId) return letter;
+    const us = await getUserSettings();
+    const doc = await us.findOne({ ownerId: letter.ownerId });
+    const dflt = doc?.defaults?.layout;
+    if (!dflt) return letter;
+    const own = letter.settings?.layout || {};
+    const merged = {};
+    for (const k of LAYOUT_KEYS) {
+      const v = own[k];
+      merged[k] = (v !== undefined && v !== null && v !== "") ? v : (dflt[k] ?? null);
+    }
+    return { ...letter, settings: { ...(letter.settings || {}), layout: merged } };
+  } catch {
+    return letter; // never let the default lookup break a read
+  }
 }
 const blocked = (reason, status, extra = {}) => NextResponse.json({ blocked: true, reason, ...extra }, { status });
 
@@ -47,7 +71,7 @@ export async function POST(req, { params }) {
     if (body.preview) {
       const o = await requireOwner();
       if (!o.ok || !ownsLetter(letter, o.userId, o.enabled)) return blocked("notfound", 404);
-      return NextResponse.json({ blocked: false, preview: true, letter: publicLetter(letter) });
+      return NextResponse.json({ blocked: false, preview: true, letter: publicLetter(await withWorkspaceLayout(letter)) });
     }
 
     const s = letter.settings || {};
@@ -86,7 +110,7 @@ export async function POST(req, { params }) {
       { upsert: true }
     );
 
-    return NextResponse.json({ blocked: false, letter: publicLetter(fresh) });
+    return NextResponse.json({ blocked: false, letter: publicLetter(await withWorkspaceLayout(fresh)) });
   } catch (e) {
     console.error("[read]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
