@@ -71,7 +71,22 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     catch (e) { alert(e.message); }
     setBusy(false);
   };
-  const insertVideo = () => openUrl({ title: "Add a video", hint: "Paste a YouTube link or a direct video file URL (.mp4).", submit: (u) => editor.chain().focus().insertContent({ type: "video", attrs: { src: u } }).run() });
+  const insertVideo = () => openUrl({
+    title: "Add a video",
+    hint: cloudinaryEnabled()
+      ? "Upload a video file from your device, or paste a YouTube link / direct .mp4 URL."
+      : "Paste a YouTube link or a direct video file URL (.mp4). File uploads need Cloudinary.",
+    accept: cloudinaryEnabled() ? "video/*" : undefined,
+    fileLabel: "🎬 Choose a video file",
+    fileNote: "Uploads to your media CDN and streams — it is not stored inside the letter.",
+    onFile: cloudinaryEnabled() ? async (f) => {
+      setBusy(true);
+      try { const url = await uploadToCloudinary(f, "video"); editor.chain().focus().insertContent({ type: "video", attrs: { src: url } }).run(); }
+      catch (e) { alert(e.message); }
+      setBusy(false);
+    } : undefined,
+    submit: (u) => editor.chain().focus().insertContent({ type: "video", attrs: { src: u } }).run(),
+  });
   const insertAudio = () => {
     if (cloudinaryEnabled()) {
       const inp = document.createElement("input"); inp.type = "file"; inp.accept = "audio/*";
@@ -90,13 +105,29 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     editor.chain().focus().insertContent(content).run();
   };
 
+  // When Cloudinary is on, push each rendered PDF page to the CDN and reference it
+  // by URL (like Medium) instead of embedding a multi-MB base64 JPEG per page.
+  const pagesToImageNodes = async (pages) => {
+    if (!cloudinaryEnabled()) return pages.map(p => ({ type: "image", attrs: { src: p.dataUrl, bleed: true, width: p.w, height: p.h } }));
+    const nodes = [];
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      setImporting({ done: i, total: pages.length, label: "Uploading pages to your CDN…" });
+      let src = p.dataUrl;
+      try { const blob = await (await fetch(p.dataUrl)).blob(); src = await uploadToCloudinary(new File([blob], `pdf-page-${i + 1}.jpg`, { type: "image/jpeg" }), "image"); }
+      catch { /* upload failed for this page — keep the inline data URL as a fallback */ }
+      nodes.push({ type: "image", attrs: { src, bleed: true, width: p.w, height: p.h } });
+    }
+    return nodes;
+  };
+
   // Split a multi-page PDF into one image page per PDF page.
   const importPdf = async (source) => {
     setUrlCfg(null); setImporting({ done: 0, total: 0 });
     try {
       const pages = await pdfToPages(source, { onProgress: (done, total) => setImporting({ done, total }) });
       if (!pages.length) throw new Error("That PDF had no pages.");
-      insertPages(pages.map(p => ({ type: "image", attrs: { src: p.dataUrl, bleed: true, width: p.w, height: p.h } })));
+      insertPages(await pagesToImageNodes(pages));
     } catch (e) { alert(e.message || "Couldn't import that PDF."); }
     setImporting(null);
   };
@@ -122,8 +153,9 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
       setImporting({ done: 0, total: 0 });
       try {
         const pages = await pdfToPages(url, { onProgress: (done, total) => setImporting({ done, total }) });
+        const nodes = await pagesToImageNodes(pages);
         setImporting(null);
-        return insertPages(pages.map(p => ({ type: "image", attrs: { src: p.dataUrl, bleed: true } })));
+        return insertPages(nodes);
       } catch { setImporting(null); /* fall through to embed below */ }
     }
     const r = resolveImport(url);
@@ -237,7 +269,7 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
       {importing && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1001, background: "rgba(0,0,0,.6)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: "24px 30px", textAlign: "center", minWidth: 240 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: A.bright || A.text, marginBottom: 10 }}>Splitting your PDF into pages…</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: A.bright || A.text, marginBottom: 10 }}>{importing.label || "Splitting your PDF into pages…"}</div>
             <div style={{ height: 6, borderRadius: 99, background: A.border, overflow: "hidden", marginBottom: 8 }}>
               <div style={{ height: "100%", width: importing.total ? `${(importing.done / importing.total) * 100}%` : "15%", background: A.accent, transition: "width .25s" }} />
             </div>
@@ -273,13 +305,13 @@ function UrlModal({ A, cfg, val, setVal, onSubmit, onClose }) {
       <div onMouseDown={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
         <div style={{ fontSize: 16, fontWeight: 600, color: A.bright || A.text, marginBottom: 6 }}>{cfg.title}</div>
         {cfg.hint && <div style={{ fontSize: 12, color: A.dim, lineHeight: 1.5, marginBottom: 14 }}>{cfg.hint}</div>}
-        {isImport && cfg.onFile && (
+        {cfg.onFile && (
           <>
             <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "14px 12px", borderRadius: 10, border: `1.5px dashed ${A.accent}88`, background: A.accent + "10", color: A.bright || A.text, fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 6 }}>
-              📄 Choose a PDF or image
-              <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) { onClose(); cfg.onFile(f); } e.target.value = ""; }} />
+              {cfg.fileLabel || "📄 Choose a PDF or image"}
+              <input type="file" accept={cfg.accept || "application/pdf,image/*"} style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) { onClose(); cfg.onFile(f); } e.target.value = ""; }} />
             </label>
-            <div style={{ fontSize: 10.5, color: A.dim, textAlign: "center", marginBottom: 12 }}>A multi-page PDF splits into one letter page per page.</div>
+            <div style={{ fontSize: 10.5, color: A.dim, textAlign: "center", marginBottom: 12 }}>{cfg.fileNote || "A multi-page PDF splits into one letter page per page."}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 12px" }}>
               <div style={{ flex: 1, height: 1, background: A.border }} /><span style={{ fontSize: 10, color: A.dim }}>or paste a link</span><div style={{ flex: 1, height: 1, background: A.border }} />
             </div>
