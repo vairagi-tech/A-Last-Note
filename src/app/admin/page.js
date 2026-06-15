@@ -32,6 +32,7 @@ export default function AdminPage() {
   const [selectedLog, setSelectedLog] = useState(null);
   const [logs, setLogs] = useState([]);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [defaults, setDefaults] = useState({});
   const [creatingNew, setCreatingNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -61,6 +62,24 @@ export default function AdminPage() {
   }, [view, anLetterId]);
 
   useEffect(() => { if (!selectedLog) return; fetch(`/api/sessions/${selectedLog}`).then(r => r.json()).then(d => setLogs(d?.logs || [])).catch(() => setLogs([])); }, [selectedLog]);
+
+  // Copy a string to the clipboard with a fallback for browsers/contexts where
+  // navigator.clipboard is unavailable, plus visible "Copied!" feedback.
+  const copyText = async (text) => {
+    let ok = false;
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch { /* fall through */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    else { window.prompt("Copy this link:", text); }
+  };
 
   const upd = (patch) => setActive(p => ({ ...p, ...patch }));
   const updSettings = (patch) => setActive(p => ({ ...p, settings: { ...p.settings, ...patch } }));
@@ -494,7 +513,7 @@ function EditorPane({ active, setActive, theme, st, tab, setTab, save, saved, pr
                 <h3 className="text-sm font-semibold mb-2" style={{ color: A.green }}>Shareable link</h3>
                 <div className="flex items-center gap-2 mb-3">
                   <code className="flex-1 text-xs p-2.5 rounded-lg" style={{ background: A.bg, color: A.bright, border: `1px solid ${A.border}` }}>{appUrl}/read/{active.linkId}</code>
-                  <button onClick={() => navigator.clipboard?.writeText(`${appUrl}/read/${active.linkId}`)} className="text-xs px-3 py-2 rounded-lg" style={{ background: A.accent, color: A.onAccent }}>Copy</button>
+                  <button onClick={() => copyText(`${appUrl}/read/${active.linkId}`)} className="text-xs px-3 py-2 rounded-lg" style={{ background: A.accent, color: A.onAccent }}>{copied ? "Copied!" : "Copy"}</button>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <a href={`https://wa.me/?text=${encodeURIComponent(`${appUrl}/read/${active.linkId}`)}`} target="_blank" rel="noreferrer" className="text-xs px-3 py-2 rounded-lg" style={{ background: "#25D366", color: "#fff" }}>WhatsApp</a>

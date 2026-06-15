@@ -313,7 +313,7 @@ export default function ReaderPage({ params }) {
   // mobile address bar; `overflow` is NOT hidden so the page can always scroll.
   // Column flex: justifyContent is the VERTICAL axis (top/center/bottom placement);
   // alignItems is horizontal — always centered.
-  const base = { fontFamily: t.bodyFont, minHeight: "100dvh", width: "100%", background: t.bg, backgroundImage: t.bgImage ? `url(${t.bgImage})` : undefined, backgroundSize: "cover", backgroundAttachment: "fixed", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: lay.align, padding: `${padTop}px ${padSide}px ${Math.max(padTop, 64)}px`, position: "relative",
+  const base = { fontFamily: t.bodyFont, minHeight: "100dvh", width: "100%", background: t.bg, backgroundImage: t.bgImage ? `url(${t.bgImage})` : undefined, backgroundSize: "cover", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: lay.align, padding: `${padTop}px ${padSide}px ${Math.max(padTop, 64)}px`, position: "relative",
     ...(drm ? { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" } : {}) };
   const blurNow = drm && hold && !holding;
   const protFilter = blurNow ? "blur(18px)" : undefined;
