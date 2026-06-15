@@ -7,7 +7,7 @@ import AudioPlayer from "@/components/tiptap/AudioPlayer";
 import { DecorationGlyph, DECO_GROUPS } from "@/components/tiptap/decorations";
 import { CANVAS_W } from "@/lib/letterDoc";
 import { cloudinaryEnabled, uploadToCloudinary } from "@/lib/cloudinary";
-import { fileToDataUrl } from "@/lib/pdfSplit";
+import { compressToDataUrl, compressToFile } from "@/lib/imageCompress";
 
 // Canva mode: the SAME document, every node freely positioned — plus decorative
 // stickers/shapes/doodles you drop straight onto the surface.
@@ -54,7 +54,8 @@ export default function FreestyleBoard({ doc, onChange, theme, ui }) {
     if (!file) return;
     setUploading(true);
     try {
-      const src = cloudinaryEnabled() ? await uploadToCloudinary(file, "image") : await fileToDataUrl(file);
+      // Stickers are small on-screen — recompress hard so they stay light.
+      const src = cloudinaryEnabled() ? await uploadToCloudinary(await compressToFile(file, { maxWidth: 600, maxHeight: 600 }), "image") : await compressToDataUrl(file, { maxWidth: 600, maxHeight: 600 });
       insertDeco({ kind: "img", variant: "upload", content: src, color: "", w: 120, h: 120 });
     } catch (e) { alert(e.message || "Couldn’t add that sticker."); }
     setUploading(false);

@@ -7,7 +7,8 @@ import { themeToVars, ensureFreestyle, clearFreestyle } from "@/lib/letterDoc";
 import { FONT_OPTIONS } from "@/lib/themes";
 import { cloudinaryEnabled, uploadToCloudinary } from "@/lib/cloudinary";
 import { resolveImport } from "@/lib/embed";
-import { pdfToPages, fileToDataUrl } from "@/lib/pdfSplit";
+import { pdfToPages } from "@/lib/pdfSplit";
+import { compressToDataUrl, compressToFile } from "@/lib/imageCompress";
 import { LetterProseStyles } from "@/components/tiptap/proseStyles";
 import FreestyleBoard from "@/components/tiptap/FreestyleBoard";
 
@@ -23,12 +24,32 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
   const [importing, setImporting] = useState(null); // {done,total} while splitting a PDF
   const openUrl = (cfg) => { setUrlVal(""); setUrlCfg(cfg); };
   const submitUrl = () => { const u = urlVal.trim(); if (u && urlCfg) urlCfg.submit(u); setUrlCfg(null); };
+  // Compress any pasted/dropped image before it enters the doc — pasted screenshots
+  // are the #1 source of multi-MB base64. Uploads to Cloudinary when configured,
+  // else stores a downscaled WebP/JPEG data URL.
+  const imageFilesFrom = (dt) => Array.from(dt?.files || []).filter(f => f.type?.startsWith("image/"));
+  const insertImageFiles = async (view, files) => {
+    setBusy(true);
+    try {
+      for (const file of files) {
+        let src;
+        if (cloudinaryEnabled()) { try { src = await uploadToCloudinary(await compressToFile(file), "image"); } catch { src = await compressToDataUrl(file); } }
+        else src = await compressToDataUrl(file);
+        const node = view.state.schema.nodes.image.create({ src });
+        view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+      }
+    } finally { setBusy(false); }
+  };
   const editor = useEditor({
     immediatelyRender: false,
     extensions: buildExtensions(),
     content: doc || { type: "doc", content: [{ type: "paragraph" }] },
     onUpdate: ({ editor }) => onChange(editor.getJSON()),
-    editorProps: { attributes: { class: "lp-prose" } },
+    editorProps: {
+      attributes: { class: "lp-prose" },
+      handlePaste: (view, event) => { const f = imageFilesFrom(event.clipboardData); if (!f.length) return false; event.preventDefault(); insertImageFiles(view, f); return true; },
+      handleDrop: (view, event) => { const f = imageFilesFrom(event.dataTransfer); if (!f.length) return false; event.preventDefault(); insertImageFiles(view, f); return true; },
+    },
   });
 
   if (!editor) return <p style={{ color: A.dim }}>Loading editor…</p>;
@@ -40,7 +61,7 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
   const pd = (e) => e.preventDefault();
   const uploadImage = async (file) => {
     setBusy(true);
-    try { const url = await uploadToCloudinary(file, "image"); editor.chain().focus().setImage({ src: url }).run(); }
+    try { const url = await uploadToCloudinary(await compressToFile(file), "image"); editor.chain().focus().setImage({ src: url }).run(); }
     catch (e) { alert(e.message); }
     setBusy(false);
   };
@@ -80,7 +101,7 @@ export default function LetterEditor({ doc, onChange, theme, ui }) {
     if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return importPdf(file);
     setUrlCfg(null); setBusy(true);
     try {
-      const src = cloudinaryEnabled() ? await uploadToCloudinary(file, "image") : await fileToDataUrl(file);
+      const src = cloudinaryEnabled() ? await uploadToCloudinary(await compressToFile(file), "image") : await compressToDataUrl(file);
       insertPages([{ type: "image", attrs: { src, bleed: true } }]);
     } catch (e) { alert(e.message); }
     setBusy(false);
